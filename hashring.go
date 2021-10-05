@@ -105,6 +105,43 @@ func (h *HashRing) GetNodePos(stringKey string) (pos int, ok bool) {
 	}
 }
 
+func (h *HashRing) AddNode(node string) *HashRing {
+	for _, eNode := range h.nodes {
+		if eNode == node {
+			return h
+		}
+	}
+
+	h.ring = make(map[HashKey]string)
+	h.sortedKeys = make([]HashKey, 0)
+	h.nodes = append(h.nodes, node)
+	h.generateCircle()
+	return h
+}
+
+func (h *HashRing) RemoveNode(node string) *HashRing {
+	nodes := make([]string, 0)
+	for _, eNode := range h.nodes {
+		if eNode != node {
+			nodes = append(nodes, eNode)
+		}
+	}
+
+	weights := make(map[string]int)
+	for eNode, eWeight := range h.weights {
+		if eNode != node {
+			weights[eNode] = eWeight
+		}
+	}
+
+	h.ring = make(map[HashKey]string)
+	h.sortedKeys = make([]HashKey, 0)
+	h.nodes = nodes
+	h.weights = weights
+	h.generateCircle()
+	return h
+}
+
 func (h *HashRing) GenKey(key string) HashKey {
 	bKey := hashDigest(key)
 	return hashVal(bKey, func(x int) int { return x })
