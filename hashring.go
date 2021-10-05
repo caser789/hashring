@@ -269,3 +269,7 @@ func (h *HashRing) UpdateWithWeights(weights map[string]int) {
 		h.sortedKeys = newhring.sortedKeys
 	}
 }
+
+func (h *HashRing) Size() int {
+	return len(h.nodes)
+}
