@@ -3,38 +3,74 @@ package hashring
 import (
 	"crypto/md5"
 	"fmt"
-	"math"
 	"sort"
+	"strconv"
 )
 
-type HashKey uint32
+var defaultHashFunc = func() HashFunc {
+	hashFunc, err := NewHash(md5.New).Use(NewInt64PairHashKey)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create defaultHashFunc: %s", err.Error()))
+	}
+	return hashFunc
+}()
+
+type HashKey interface {
+	Less(other HashKey) bool
+}
 type HashKeyOrder []HashKey
 
-func (h HashKeyOrder) Len() int           { return len(h) }
-func (h HashKeyOrder) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
-func (h HashKeyOrder) Less(i, j int) bool { return h[i] < h[j] }
+func (h HashKeyOrder) Len() int      { return len(h) }
+func (h HashKeyOrder) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+func (h HashKeyOrder) Less(i, j int) bool {
+	return h[i].Less(h[j])
+}
+
+type HashFunc func([]byte) HashKey
 
 type HashRing struct {
 	ring       map[HashKey]string
 	sortedKeys []HashKey
 	nodes      []string
 	weights    map[string]int
+	hashFunc   HashFunc
+}
+
+type Uint32HashKey uint32
+
+func (k Uint32HashKey) Less(other HashKey) bool {
+	return k < other.(Uint32HashKey)
 }
 
 func New(nodes []string) *HashRing {
+	return NewWithHash(nodes, defaultHashFunc)
+}
+
+func NewWithHash(
+	nodes []string,
+	hashKey HashFunc,
+) *HashRing {
 	hashRing := &HashRing{
 		ring:       make(map[HashKey]string),
 		sortedKeys: make([]HashKey, 0),
 		nodes:      nodes,
 		weights:    make(map[string]int),
+		hashFunc:   hashKey,
 	}
 	hashRing.generateCircle()
 	return hashRing
 }
 
 func NewWithWeights(weights map[string]int) *HashRing {
+	return NewWithHashAndWeights(weights, defaultHashFunc)
+}
+
+func NewWithHashAndWeights(
+	weights map[string]int,
+	hashFunc HashFunc,
+) *HashRing {
 	nodes := make([]string, 0, len(weights))
-	for node, _ := range weights {
+	for node := range weights {
 		nodes = append(nodes, node)
 	}
 	hashRing := &HashRing{
@@ -42,6 +78,7 @@ func NewWithWeights(weights map[string]int) *HashRing {
 		sortedKeys: make([]HashKey, 0),
 		nodes:      nodes,
 		weights:    weights,
+		hashFunc:   hashFunc,
 	}
 	hashRing.generateCircle()
 	return hashRing
@@ -66,7 +103,7 @@ func (h *HashRing) UpdateWithWeights(weights map[string]int) {
 	}
 
 	if nodesChgFlg {
-		newhring := NewWithWeights(weights)
+		newhring := NewWithHashAndWeights(weights, h.hashFunc)
 		h.weights = newhring.weights
 		h.nodes = newhring.nodes
 		h.ring = newhring.ring
@@ -81,27 +118,18 @@ func (h *HashRing) generateCircle() {
 			totalWeight += weight
 		} else {
 			totalWeight += 1
+			h.weights[node] = 1
 		}
 	}
 
 	for _, node := range h.nodes {
-		weight := 1
+		weight := h.weights[node]
 
-		if _, ok := h.weights[node]; ok {
-			weight = h.weights[node]
-		}
-
-		factor := math.Floor(float64(40*len(h.nodes)*weight) / float64(totalWeight))
-
-		for j := 0; j < int(factor); j++ {
-			nodeKey := fmt.Sprintf("%s-%d", node, j)
-			bKey := hashDigest(nodeKey)
-
-			for i := 0; i < 3; i++ {
-				key := hashVal(bKey[i*4 : i*4+4])
-				h.ring[key] = node
-				h.sortedKeys = append(h.sortedKeys, key)
-			}
+		for j := 0; j < weight; j++ {
+			nodeKey := node + "-" + strconv.FormatInt(int64(j), 10)
+			key := h.hashFunc([]byte(nodeKey))
+			h.ring[key] = node
+			h.sortedKeys = append(h.sortedKeys, key)
 		}
 	}
 
@@ -124,10 +152,10 @@ func (h *HashRing) GetNodePos(stringKey string) (pos int, ok bool) {
 	key := h.GenKey(stringKey)
 
 	nodes := h.sortedKeys
-	pos = sort.Search(len(nodes), func(i int) bool { return nodes[i] > key })
+	pos = sort.Search(len(nodes), func(i int) bool { return key.Less(nodes[i]) })
 
 	if pos == len(nodes) {
-		// Wrap the search, should return first node
+		// Wrap the search, should return First node
 		return 0, true
 	} else {
 		return pos, true
@@ -135,10 +163,12 @@ func (h *HashRing) GetNodePos(stringKey string) (pos int, ok bool) {
 }
 
 func (h *HashRing) GenKey(key string) HashKey {
-	bKey := hashDigest(key)
-	return hashVal(bKey[0:4])
+	return h.hashFunc([]byte(key))
 }
 
+// GetNodes iterates over the hash ring and returns the nodes in the order
+// which is determined by the key. GetNodes is thread safe if the hash
+// which was used to configure the hash ring is thread safe.
 func (h *HashRing) GetNodes(stringKey string, size int) (nodes []string, ok bool) {
 	pos, ok := h.GetNodePos(stringKey)
 	if !ok {
@@ -177,10 +207,8 @@ func (h *HashRing) AddWeightedNode(node string, weight int) *HashRing {
 		return h
 	}
 
-	for _, eNode := range h.nodes {
-		if eNode == node {
-			return h
-		}
+	if _, ok := h.weights[node]; ok {
+		return h
 	}
 
 	nodes := make([]string, len(h.nodes), len(h.nodes)+1)
@@ -198,6 +226,7 @@ func (h *HashRing) AddWeightedNode(node string, weight int) *HashRing {
 		sortedKeys: make([]HashKey, 0),
 		nodes:      nodes,
 		weights:    weights,
+		hashFunc:   h.hashFunc,
 	}
 	hashRing.generateCircle()
 	return hashRing
@@ -213,7 +242,7 @@ func (h *HashRing) UpdateWeightedNode(node string, weight int) *HashRing {
 		return h
 	}
 
-	nodes := make([]string, len(h.nodes), len(h.nodes))
+	nodes := make([]string, len(h.nodes))
 	copy(nodes, h.nodes)
 
 	weights := make(map[string]int)
@@ -227,21 +256,22 @@ func (h *HashRing) UpdateWeightedNode(node string, weight int) *HashRing {
 		sortedKeys: make([]HashKey, 0),
 		nodes:      nodes,
 		weights:    weights,
+		hashFunc:   h.hashFunc,
 	}
 	hashRing.generateCircle()
 	return hashRing
 }
 func (h *HashRing) RemoveNode(node string) *HashRing {
+	/* if node isn't exist in hashring, don't refresh hashring */
+	if _, ok := h.weights[node]; !ok {
+		return h
+	}
+
 	nodes := make([]string, 0)
 	for _, eNode := range h.nodes {
 		if eNode != node {
 			nodes = append(nodes, eNode)
 		}
-	}
-
-	/* if node isn't exist in hashring, don't refresh hashring */
-	if len(nodes) == len(h.nodes) {
-		return h
 	}
 
 	weights := make(map[string]int)
@@ -256,18 +286,8 @@ func (h *HashRing) RemoveNode(node string) *HashRing {
 		sortedKeys: make([]HashKey, 0),
 		nodes:      nodes,
 		weights:    weights,
+		hashFunc:   h.hashFunc,
 	}
 	hashRing.generateCircle()
 	return hashRing
-}
-
-func hashVal(bKey []byte) HashKey {
-	return ((HashKey(bKey[3]) << 24) |
-		(HashKey(bKey[2]) << 16) |
-		(HashKey(bKey[1]) << 8) |
-		(HashKey(bKey[0])))
-}
-
-func hashDigest(key string) [md5.Size]byte {
-	return md5.Sum([]byte(key))
 }
