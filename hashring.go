@@ -246,3 +246,26 @@ func hashDigest(key string) []byte {
 	m.Write([]byte(key))
 	return m.Sum(nil)
 }
+
+func (h *HashRing) UpdateWithWeights(weights map[string]int) {
+	nodesChgFlg := false
+	if len(weights) != len(h.weights) {
+		nodesChgFlg = true
+	} else {
+		for node, newWeight := range weights {
+			oldWeight, ok := h.weights[node]
+			if !ok || oldWeight != newWeight {
+				nodesChgFlg = true
+				break
+			}
+		}
+	}
+
+	if nodesChgFlg {
+		newhring := NewWithWeights(weights)
+		h.weights = newhring.weights
+		h.nodes = newhring.nodes
+		h.ring = newhring.ring
+		h.sortedKeys = newhring.sortedKeys
+	}
+}
