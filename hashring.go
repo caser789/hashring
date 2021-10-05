@@ -146,3 +146,23 @@ func (h *HashRing) GenKey(key string) HashKey {
 	bKey := hashDigest(key)
 	return hashVal(bKey, func(x int) int { return x })
 }
+
+func (h *HashRing) AddWeightedNode(node string, weight int) *HashRing {
+	if weight <= 0 {
+		return h
+	}
+
+	for _, eNode := range h.nodes {
+		if eNode == node {
+			return h
+		}
+	}
+
+	h.weights[node] = weight
+
+	h.ring = make(map[HashKey]string)
+	h.sortedKeys = make([]HashKey, 0)
+	h.nodes = append(h.nodes, node)
+	h.generateCircle()
+	return h
+}

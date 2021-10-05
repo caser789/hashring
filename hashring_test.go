@@ -263,3 +263,22 @@ func TestAddRemoveNode(t *testing.T) {
 
 	expectNodesABC(t, hashRing)
 }
+
+func TestAddWeightedNode(t *testing.T) {
+	nodes := []string{"a", "c"}
+	weights := make(map[string]int)
+	hashRing := NewHashRing(nodes, weights)
+	hashRing.AddWeightedNode("b", 0)
+	hashRing.AddWeightedNode("b", 2)
+	hashRing.AddWeightedNode("b", 2)
+
+	expectNode(t, hashRing, "test", "b")
+	expectNode(t, hashRing, "test", "b")
+	expectNode(t, hashRing, "test1", "b")
+	expectNode(t, hashRing, "test2", "b")
+	expectNode(t, hashRing, "test3", "c")
+	expectNode(t, hashRing, "test4", "b")
+	expectNode(t, hashRing, "test5", "b")
+	expectNode(t, hashRing, "aaaa", "b")
+	expectNode(t, hashRing, "bbbb", "a")
+}
