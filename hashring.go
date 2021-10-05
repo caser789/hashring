@@ -47,6 +47,33 @@ func NewWithWeights(weights map[string]int) *HashRing {
 	return hashRing
 }
 
+func (h *HashRing) Size() int {
+	return len(h.nodes)
+}
+
+func (h *HashRing) UpdateWithWeights(weights map[string]int) {
+	nodesChgFlg := false
+	if len(weights) != len(h.weights) {
+		nodesChgFlg = true
+	} else {
+		for node, newWeight := range weights {
+			oldWeight, ok := h.weights[node]
+			if !ok || oldWeight != newWeight {
+				nodesChgFlg = true
+				break
+			}
+		}
+	}
+
+	if nodesChgFlg {
+		newhring := NewWithWeights(weights)
+		h.weights = newhring.weights
+		h.nodes = newhring.nodes
+		h.ring = newhring.ring
+		h.sortedKeys = newhring.sortedKeys
+	}
+}
+
 func (h *HashRing) generateCircle() {
 	totalWeight := 0
 	for _, node := range h.nodes {
@@ -115,11 +142,11 @@ func (h *HashRing) GenKey(key string) HashKey {
 func (h *HashRing) GetNodes(stringKey string, size int) (nodes []string, ok bool) {
 	pos, ok := h.GetNodePos(stringKey)
 	if !ok {
-		return []string{}, false
+		return nil, false
 	}
 
 	if size > len(h.nodes) {
-		return []string{}, false
+		return nil, false
 	}
 
 	returnedValues := make(map[string]bool, size)
@@ -241,35 +268,6 @@ func hashVal(bKey []byte) HashKey {
 		(HashKey(bKey[0])))
 }
 
-func hashDigest(key string) []byte {
-	m := md5.New()
-	m.Write([]byte(key))
-	return m.Sum(nil)
-}
-
-func (h *HashRing) UpdateWithWeights(weights map[string]int) {
-	nodesChgFlg := false
-	if len(weights) != len(h.weights) {
-		nodesChgFlg = true
-	} else {
-		for node, newWeight := range weights {
-			oldWeight, ok := h.weights[node]
-			if !ok || oldWeight != newWeight {
-				nodesChgFlg = true
-				break
-			}
-		}
-	}
-
-	if nodesChgFlg {
-		newhring := NewWithWeights(weights)
-		h.weights = newhring.weights
-		h.nodes = newhring.nodes
-		h.ring = newhring.ring
-		h.sortedKeys = newhring.sortedKeys
-	}
-}
-
-func (h *HashRing) Size() int {
-	return len(h.nodes)
+func hashDigest(key string) [md5.Size]byte {
+	return md5.Sum([]byte(key))
 }
